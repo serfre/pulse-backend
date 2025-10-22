@@ -7,26 +7,24 @@ async function getPriceCoinGecko(id) {
 
 module.exports = async (req, res) => {
   try {
-    const ids = ['bitcoin','ethereum','binancecoin','polkadot','chainlink','solana'];
+    const ids = ['bitcoin', 'ethereum', 'binancecoin', 'polkadot', 'chainlink', 'solana'];
     const data = {};
-    for (const id of ids) data[id] = (await getPriceCoinGecko(id))[id] || {};
 
-    const opportunities = Object.entries(data).map(([k,v]) => {
+    for (const id of ids) {
+      data[id] = (await getPriceCoinGecko(id))[id];
+    }
+
+    const opportunities = Object.entries(data).map(([k, v]) => {
       const price = v.usd || 0;
       const ch = v.usd_24h_change ? Number(v.usd_24h_change.toFixed(2)) : 0;
-      let decision = "WAIT";
-      if (ch <= -8) decision = "BUY";
-      if (ch >= 8)  decision = "AVOID";
-      return {
-        symbol: k.toUpperCase(), price, change_24h: `${ch}%`,
-        reasoning: `Cambio 24h ${ch}%. Reglas básicas.`,
-        decision
-      };
+      let decision = 'WAIT';
+      if (ch <= -8) decision = 'BUY';
+      if (ch >= 8) decision = 'AVOID';
+      return { symbol: k.toUpperCase(), price, change_24h: ch, decision };
     });
 
     res.json({
-      market_bias: opportunities.some(o=>o.decision==='BUY') ? 'leaning_bull' : 'neutral',
-      btc_price: (data.bitcoin?.usd || 0).toString(),
+      market_bias: opportunities.some(o => o.decision === 'BUY') ? 'leaning_bull' : 'neutral',
       opportunities
     });
   } catch (e) {
