@@ -1,17 +1,52 @@
 const fetch = require('node-fetch');
 
-async function getPriceCoinGecko(id, retries = 3) {
-  for (let i = 0; i < retries; i++) {
-    try {
-      const r = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${id}&vs_currencies=usd&include_24hr_change=true`);
-      if (!r.ok) throw new Error(`Error ${r.status}`);
-      const json = await r.json();
-      if (json && json[id]) return json[id];
-    } catch (e) {
-      console.warn(`Intento ${i + 1} falló para ${id}: ${e.message}`);
-      await new Promise(res => setTimeout(res, 1000)); // espera 1 segundo antes de reintentar
-    }
+async function getPriceFromCoinGecko(id) {
+  const url = `https://api.coingecko.com/api/v3/simple/price?ids=${id}&vs_currencies=usd&include_24hr_change=true`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`CoinGecko ${res.status}`);
+  const data = await res.json();
+  return data[id] || null;
+}
+
+async function getPriceFromPaprika(id) {
+  const paprikaMap = {
+    bitcoin: 'btc-bitcoin',
+    ethereum: 'eth-ethereum',
+    binancecoin: 'bnb-binance-coin',
+    polkadot: 'dot-polkadot',
+    chainlink: 'link-chainlink',
+    solana: 'sol-solana'
+  };
+
+  const coinId = paprikaMap[id];
+  if (!coinId) return null;
+
+  const url = `https://api.coinpaprika.com/v1/tickers/${coinId}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Paprika ${res.status}`);
+  const data = await res.json();
+
+  return {
+    usd: data?.quotes?.USD?.price || 0,
+    usd_24h_change: data?.quotes?.USD?.percent_change_24h || 0
+  };
+}
+
+async function getCryptoData(id) {
+  try {
+    const cg = await getPriceFromCoinGecko(id);
+    if (cg && cg.usd) return cg;
+  } catch (e) {
+    console.warn(`⚠️ CoinGecko falló para ${id}: ${e.message}`);
   }
+
+  try {
+    const cp = await getPriceFromPaprika(id);
+    if (cp && cp.usd) return cp;
+  } catch (e) {
+    console.warn(`⚠️ Paprika también falló para ${id}: ${e.message}`);
+  }
+
   return null;
 }
 
@@ -21,8 +56,8 @@ module.exports = async (req, res) => {
     const results = [];
 
     for (const id of ids) {
-      const info = await getPriceCoinGecko(id);
-      if (!info || typeof info.usd === 'undefined') continue;
+      const info = await getCryptoData(id);
+      if (!info) continue;
 
       const price = Number(info.usd) || 0;
       const ch = Number(info.usd_24h_change) || 0;
@@ -41,7 +76,7 @@ module.exports = async (req, res) => {
     }
 
     if (!results.length) {
-      throw new Error('Sin datos válidos de CoinGecko (todos los reintentos fallaron)');
+      throw new Error('Sin datos válidos ni de CoinGecko ni de CoinPaprika');
     }
 
     const market_bias = results.some(o => o.decision === 'BUY')
