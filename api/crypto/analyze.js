@@ -1,9 +1,15 @@
 const fetch = require('node-fetch');
 
 async function getPriceCoinGecko(id) {
-  const r = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${id}&vs_currencies=usd&include_24hr_change=true`);
-  const data = await r.json();
-  return data[id] || null; // si no existe, devuelve null
+  try {
+    const r = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${id}&vs_currencies=usd&include_24hr_change=true`);
+    if (!r.ok) throw new Error(`Error ${r.status}`);
+    const json = await r.json();
+    return json[id] || null;
+  } catch (e) {
+    console.error(`Error al obtener datos de ${id}:`, e.message);
+    return null;
+  }
 }
 
 module.exports = async (req, res) => {
@@ -13,10 +19,14 @@ module.exports = async (req, res) => {
 
     for (const id of ids) {
       const info = await getPriceCoinGecko(id);
-      if (!info) continue; // salta si no devuelve datos válidos
 
-      const price = info.usd ?? 0;
-      const ch = info.usd_24h_change ?? 0;
+      if (!info || typeof info.usd === 'undefined' || typeof info.usd_24h_change === 'undefined') {
+        console.warn(`⚠️ Sin datos válidos para ${id}`);
+        continue; // si CoinGecko no devuelve datos, saltamos
+      }
+
+      const price = Number(info.usd) || 0;
+      const ch = Number(info.usd_24h_change) || 0;
 
       let decision = 'WAIT';
       if (ch <= -8) decision = 'BUY';
@@ -31,6 +41,10 @@ module.exports = async (req, res) => {
       });
     }
 
+    if (!results.length) {
+      throw new Error('Sin datos válidos de CoinGecko');
+    }
+
     const market_bias = results.some(o => o.decision === 'BUY')
       ? 'leaning_bull'
       : 'neutral';
@@ -42,6 +56,7 @@ module.exports = async (req, res) => {
     });
 
   } catch (e) {
+    console.error('❌ Error general:', e.message);
     res.status(500).json({ error: 'crypto analyze failed', details: e.message });
   }
 };
