@@ -1,47 +1,77 @@
 const Parser = require('rss-parser');
 const parser = new Parser();
 
-const feeds = {
-  applesfera: 'https://www.applesfera.com/feed',
-  xataka: 'https://www.xataka.com/index.xml',
-  gizmodo: 'https://es.gizmodo.com/rss',
-  cripto: 'https://www.criptonoticias.com/feed/',
-  andro4all: 'https://andro4all.com/feed',
-  cnn_economia: 'https://cnnespanol.cnn.com/feed/economia/',
-  eleconomista: 'https://www.eleconomista.com.mx/rss/feed.xml',
-  cointelegraph: 'https://es.cointelegraph.com/rss'
+// URLs RSS de las fuentes PRIORITARIAS
+const FEEDS = {
+  apple: [
+    'https://www.applesfera.com/index.xml'
+  ],
+  tech: [
+    'https://es.gizmodo.com/rss',
+    'https://www.xataka.com/feedburner.xml',
+    'https://andro4all.com/tecnologia/feed'
+  ],
+  crypto: [
+    'https://www.criptonoticias.com/feed/',
+    'https://es.cointelegraph.com/rss'
+  ],
+  economia: [
+    'https://cnnespanol.cnn.com/seccion/economia/feed/',
+    'https://www.eleconomista.com.mx/rss/sector-economia'
+  ]
 };
+
+async function getFeedItems(url) {
+  try {
+    const feed = await parser.parseURL(url);
+    return (feed.items || []).map(i => ({
+      title: i.title || '',
+      link: i.link || '',
+      isoDate: i.isoDate || i.pubDate || '',
+      source: (feed.title || '').trim()
+    }));
+  } catch (e) {
+    // Si algún feed falla, devolvemos arreglo vacío (no tronamos todo)
+    return [];
+  }
+}
+
+function within24h(iso) {
+  if (!iso) return false;
+  const dt = new Date(iso);
+  if (isNaN(dt)) return false;
+  const now = Date.now();
+  return (now - dt.getTime()) <= 24 * 60 * 60 * 1000;
+}
+
+function topN(arr, n) {
+  return arr
+    .sort((a, b) => (new Date(b.isoDate) - new Date(a.isoDate)))
+    .slice(0, n)
+    .map(({ title, source, link }) => ({ title, source, link }));
+}
 
 module.exports = async (req, res) => {
   try {
-    const max = Number(req.query.max_items || 4);
+    const url = new URL(req.url, 'http://localhost');
+    const maxItems = Math.max(1, Math.min(8, Number(url.searchParams.get('max_items') || 4)));
+
+    // Cargamos feeds en paralelo por categoría
+    const categories = Object.keys(FEEDS);
     const results = {};
-    for (const [key, url] of Object.entries(feeds)) {
-      try {
-        const feed = await parser.parseURL(url);
-        results[key] = (feed.items || []).slice(0, max).map(i => ({
-          title: i.title, link: i.link, source: feed.title || key
-        }));
-      } catch {
-        results[key] = [];
-      }
+    for (const cat of categories) {
+      const urls = FEEDS[cat];
+      const lists = await Promise.all(urls.map(getFeedItems));
+      const merged = lists.flat().filter(it => within24h(it.isoDate));
+      results[cat] = topN(merged, maxItems);
     }
 
-    // Agrupado por los temas que te laten
-    const response = {
-      crypto: results['cripto'] || [],
-      tech:   [...(results['xataka']||[]), ...(results['gizmodo']||[]), ...(results['andro4all']||[])].slice(0, max),
-      apple:  results['applesfera'] || [],
-      cameras: [],     // luego agregamos DPReview / SonyAlpha si quieres
-      domotica: [],    // HA blog no siempre tiene RSS; lo puedo scrapear después
-      nas: [],
-      economia: [...(results['cnn_economia']||[]), ...(results['eleconomista']||[])].slice(0, max),
-      filmpro: [],
-      salud: []
-    };
+    // Derivadas “domótica” y “nas” quedan vacías por ahora (si quieres llenarlas luego)
+    results.domotica = [];
+    results.nas = [];
 
-    res.json(response);
+    res.status(200).json(results);
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: 'news/daily failed', details: e.message });
   }
 };
