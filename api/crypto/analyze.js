@@ -2,31 +2,45 @@ const fetch = require('node-fetch');
 
 async function getPriceCoinGecko(id) {
   const r = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${id}&vs_currencies=usd&include_24hr_change=true`);
-  return r.json();
+  const data = await r.json();
+  return data[id] || null; // si no existe, devuelve null
 }
 
 module.exports = async (req, res) => {
   try {
     const ids = ['bitcoin', 'ethereum', 'binancecoin', 'polkadot', 'chainlink', 'solana'];
-    const data = {};
+    const results = [];
 
     for (const id of ids) {
-      data[id] = (await getPriceCoinGecko(id))[id];
-    }
+      const info = await getPriceCoinGecko(id);
+      if (!info) continue; // salta si no devuelve datos válidos
 
-    const opportunities = Object.entries(data).map(([k, v]) => {
-      const price = v.usd || 0;
-      const ch = v.usd_24h_change ? Number(v.usd_24h_change.toFixed(2)) : 0;
+      const price = info.usd ?? 0;
+      const ch = info.usd_24h_change ?? 0;
+
       let decision = 'WAIT';
       if (ch <= -8) decision = 'BUY';
       if (ch >= 8) decision = 'AVOID';
-      return { symbol: k.toUpperCase(), price, change_24h: ch, decision };
-    });
+
+      results.push({
+        symbol: id.toUpperCase(),
+        price,
+        change_24h: ch.toFixed(2),
+        reasoning: `Cambio 24h ${ch.toFixed(2)}%.`,
+        decision
+      });
+    }
+
+    const market_bias = results.some(o => o.decision === 'BUY')
+      ? 'leaning_bull'
+      : 'neutral';
 
     res.json({
-      market_bias: opportunities.some(o => o.decision === 'BUY') ? 'leaning_bull' : 'neutral',
-      opportunities
+      market_bias,
+      btc_price: results.find(r => r.symbol === 'BITCOIN')?.price || 0,
+      opportunities: results
     });
+
   } catch (e) {
     res.status(500).json({ error: 'crypto analyze failed', details: e.message });
   }
