@@ -1,0 +1,10 @@
+{
+  "name": "pulse-backend",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": { "start": "vercel dev" },
+  "dependencies": {
+    "node-fetch": "^2.6.7",
+    "rss-parser": "^3.12.0"
+  }
+}
